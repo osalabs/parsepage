@@ -50,7 +50,7 @@ _/test/main.html_
 <p><~more_data></p>
 ```
 
-### Sample code. 
+### Sample code.
 This will load `page_tpl.html` layout and insert/parse sub-templates from `/test` directory, then output to browser;
 ```php
 $ps=array(
@@ -82,14 +82,14 @@ Generally ParsePage called as following (depending on language syntax will diffe
 `parse_page(BASE_DIR, PAGE_TPL_FILE, PS, [OUTPUT_FILENAME])`
 
 where:
-- `BASE_DIR` - directory (relative to /template) with sub-templates for current page 
+- `BASE_DIR` - directory (relative to /template) with sub-templates for current page
 - `PAGE_TPL_FILE` - path (relative to /template) to main page template/layout used for current page
 - `PS` - "parse strings" - associative array (hashtable) with variable names/values to be replaced in templates
 - `OUTPUT_FILENAME` - optional, output file name, if defined ParsePage will write output to this file, instead of output to browser
- 
+
 ### Tag syntax
 
-Tags in templates should be in `<~tag_name [optional attributes]>` format. 
+Tags in templates should be in `<~tag_name [optional attributes]>` format.
 
 `tag_name` could be:
 
@@ -104,6 +104,8 @@ Tags in templates should be in `<~tag_name [optional attributes]>` format.
     - `./tag_name` - (relative path) will look for `tag_name.html` in directory relative to currently parsed template file (see samples)
     - `/subdir/tag_name` - (absolute path) will look for `/subdir/tag_name.html` relative to `/template` directory
 
+Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use `noescape` attr: `<~raw_variable noescape>`
+
 ### Supported attributes
 
 - `var` - tag is variable, no fileseek necessary even if no such variable passed to ParsePage: `<~tag var>`
@@ -114,5 +116,78 @@ Tags in templates should be in `<~tag_name [optional attributes]>` format.
   - `<~tag ifge="var" value="XXX">` - tag/template will be parsed only if var>=XXX
   - `<~tag iflt="var" value="XXX">` - tag/template will be parsed only if var<XXX
   - `<~tag ifle="var" value="XXX">` - tag/template will be parsed only if var<=XXX
+- `vvalue` - used with `ifXX` conditions to indicate that value to compare should be read from PS variable
+  - `<~tag ifeq="var" vvalue="var2">` - tag parsed if PS['var']==PS['var2']
+- `if`
+    - `<~tag if="var">` - tag parsed if var is evaluated as TRUE, equivalent to `if ($var)`
+- `unless`
+    - `<~tag unless="var">` - tag parsed if var is evaluated as TRUE, equivalent to `if (!$var)`
+    - TRUE values:
+      - non-empty string, but not equal to '0'!
+      - 1 or other non-zero number
+      - true (boolean)
+    - FALSE values:
+      - '0'
+      - 0
+      - false (boolean)
+      - ''
+      - unset/undefined variable
+- `repeat` - this tag is repeat content (PS should contain reference to array of hashtables),
+  - `<~tag repeat inline>repeated sub-template content</~tag>` - inline sample
+  - inside repeat sub-template supported repeat vars:
+    - repeat.first (0-not first, 1-first)
+    - repeat.last  (0-not last, 1-last)
+    - repeat.total (total number of items)
+    - repeat.index  (0-based)
+    - repeat.iteration (1-based)
+- `sub` - this tag tells parser to use sub-hashtable for parse sub-template (PS variable should contain reference to hashtable)
+- `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'
+- `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates)
+- `select="var"` - this tag tells parser to load file with tag name and use it as value|display for <select> html tag, example:
+
+     <select name="item[fcombo]">
+     <option value=""> - select -
+     <~./fcombo.sel select="fcombo">
+     </select>
+
+- `radio="var" name="YYY" [delim="ZZZ"]` - this tag tell parser to load file and use it as value|display for <input type=radio> html tags, example: `<~fradio.sel radio="fradio" name="item[fradio]" delim="&nbsp;">`
+- `selvalue="var"` - display value (fetched from the tag name file) for the var (example: to display 'select' and 'radio' values in List view), example: `<~fcombo.sel selvalue="fcombo">`
+- `htmlescape` - replace special symbols by their html equivalents (such as <>,",'). This attribute is applied automatically to all tags by default.
+- `noescape` - will not apply htmlescape to tag value
+- `date` - will format tag value as date, format depends on language: (PHP)[http://php.net/manual/en/function.date.php], (ASP.NET)[https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx]
+  - `<~tag date>` or `<~tag date="d M Y H:i">`
+- `truncate` - truncates a variable to a character length (default 80), optionally - append trchar if truncated, truncate at word boundary (trword), truncate at end or in the middle (trend)
+  - `<~tag truncate="80" trchar="..." trword="1" trend="1">` - default values
+- `strip_tags` - remove any html tags from value
+- `trim` - remove leading and trailing space from value
+- `nl2br` - convert newline chars to <br>
+- `count` - ouput count of elements in value instead of value (for arrays only)
+- `lower` - convert value to lowercase
+- `upper` - convert value to lowercase
+- `default` - if value is empty, ouput default value instead
+  - `<~tag default="none">`
+- `urlencode` - encode value for URLs
+- `var2js` - ouput variable as JSON string
+- `markdown` - convert markdown text to html using appropriate library for the language (ASP.NET - CommonMark.NET). Note: may wrap tag with <p>
 
 
+- `<~session[var]>` - this tag is a SESSION variable, not in PS hashtable (for PHP it's $_SESSION, for ASP.NET it's current context's HttpSessionState object)
+- `<~global[var]>` - this tag is a global var, not in PS hashtable (for PHP it's $_GLOBALS, for ASP.NET it depends on framework global storage - TODO remove dependency)
+
+### Multi-language support
+
+TODO: describe better
+
+Support \`text\` => replaced by multilang from `/template/lang/$lang.txt` according to global lang (english by default)
+
+Example: `<b>\`Hello\`</b>`
+
+lang.txt line format:
+
+    english string === string in another language
+
+
+## TODO
+- more samples
+- sample live site
+- tests
