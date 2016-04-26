@@ -154,7 +154,7 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
 - `selvalue="var"` - display value (fetched from the tag name file) for the var (example: to display 'select' and 'radio' values in List view), example: `<~fcombo.sel selvalue="fcombo">`
 - `htmlescape` - replace special symbols by their html equivalents (such as <>,",'). This attribute is applied automatically to all tags by default.
 - `noescape` - will not apply htmlescape to tag value
-- `date` - will format tag value as date, format depends on language: (PHP)[http://php.net/manual/en/function.date.php], (ASP.NET)[https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx]
+- `date` - will format tag value as date, format depends on language: [PHP](http://php.net/manual/en/function.date.php), [ASP.NET](https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx)
   - `<~tag date>` or `<~tag date="d M Y H:i">`
 - `truncate` - truncates a variable to a character length (default 80), optionally - append trchar if truncated, truncate at word boundary (trword), truncate at end or in the middle (trend)
   - `<~tag truncate="80" trchar="..." trword="1" trend="1">` - default values
