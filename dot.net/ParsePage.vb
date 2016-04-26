@@ -70,8 +70,8 @@
 '     <option value=""> - select -
 '     <~./fcombo.sel select="fcombo">
 '     </select>
-'radio="var" name="YYY" [delim="ZZZ"]- this tag tell parser to load file and use it as value|display for <input type=radio> tags, example:
-'     <~./fradio.sel radio="fradio" name="item[fradio]" delim="&nbsp;">
+'radio="var" name="YYY" [delim="inline"]- this tag tell parser to load file and use it as value|display for <input type=radio> tags, Bootsrtrap 3 style, example:
+'     <~./fradio.sel radio="fradio" name="item[fradio]" delim="inline">
 'selvalue="var" - display value (fetched from the .sel file) for the var (example: to display 'select' and 'radio' values in List view)
 '     ex: <~../fcombo.sel selvalue="fcombo">
 'TODO nolang - for subtemplates - use default language instead of current (usually english)
@@ -101,7 +101,6 @@
 
 Imports System.IO
 Imports Newtonsoft.Json
-Imports CommonMark 'for markdown attibute
 
 Public Class ParsePage
     Private Shared RX_NOTS As New Regex("^(\S+)", RegexOptions.Compiled)
@@ -120,6 +119,11 @@ Public Class ParsePage
 
     Private Shared DEF_DATE_FORMAT As String = "M/d/yyyy" ' for US
     '"d M yyyy HH:mm"
+
+    'for dynamic load of CommonMark markdown converter
+    Private Shared aCommonMark As Reflection.Assembly
+    Private Shared tCommonMarkConverter As Type
+    Private Shared mConvert As Reflection.MethodInfo
 
     Private fw As FW
     Private TMPL_PATH As String
@@ -171,7 +175,7 @@ Public Class ParsePage
 
                 For Each tag_match In tags_full
                     tag_full = tag_match.Groups(1).Value
-                    If TAGSEEN.ContainsKey(tag_full) Then Continue For
+                    If TAGSEEN.ContainsKey(tag_full) Then Continue For 'each tag (tag_full) parsed just once and replaces all occurencies of the tag in the page
                     TAGSEEN.Add(tag_full, 1)
 
                     tag = tag_full
@@ -268,19 +272,22 @@ Public Class ParsePage
 
         'check and get from cache
         If FILE_CACHE.ContainsKey(filename) Then
+            Dim cached_item As Hashtable = FILE_CACHE(filename)
             'if debug is off - don't check modify time for better performance (but app restart would be necessary if template changed)
             If fw.config("is_debug") Then
                 modtime = File.GetLastWriteTime(filename)
-                Dim mtmp As String = FILE_CACHE(filename).item("modtime")
-                If mtmp = "" OrElse mtmp = modtime Then Return FILE_CACHE(filename).item("data")
+                Dim mtmp As String = cached_item("modtime")
+                If mtmp = "" OrElse mtmp = modtime Then
+                    Return cached_item("data")
+                End If
             Else
-                Return FILE_CACHE(filename).item("data")
+                Return cached_item("data")
             End If
         Else
             If fw.config("is_debug") Then modtime = File.GetLastWriteTime(filename)
         End If
 
-        'FW.logger("try load file " & filename)
+        'fw.logger("try load file " & filename)
         'get from fs(if not in cache)
         If File.Exists(filename) Then
             file_data = fw.get_file_content(filename)
@@ -288,12 +295,13 @@ Public Class ParsePage
         End If
 
         'get from fs(if not in cache)
-        file_data = FW.get_file_content(filename)
+        file_data = fw.get_file_content(filename)
         Dim cache As Hashtable = New Hashtable
         cache("data") = file_data
         cache("modtime") = modtime
 
         FILE_CACHE(filename) = cache
+        'fw.logger("END preacaching [" & filename & "]")
         Return file_data
 
     End Function
@@ -334,6 +342,9 @@ Public Class ParsePage
     End Sub
 
     'hf can be: Hashtable or HttpSessionState
+    'returns: 
+    '  value (string, hashtable, etc..), empty string "" 
+    '  Or Nothing - tag not present in hf param (only if hf is Hashtable), file lookup will be necessary
     Private Function hfvalue(ByVal tag As String, ByVal hf As Object) As Object
         Dim tag_value As Object = ""
         Dim ptr As Object
@@ -389,27 +400,40 @@ Public Class ParsePage
                     End If
                 Next
                 tag_value = ptr
-
+                If tag_value Is Nothing Then tag_value = ""
             Else
                 If TypeOf (hf) Is HttpSessionState Then
                     If DirectCast(hf, HttpSessionState).Item(tag) IsNot Nothing Then
                         tag_value = DirectCast(hf, HttpSessionState).Item(tag)
                     End If
+                    If tag_value Is Nothing Then tag_value = ""
                 ElseIf TypeOf (hf) Is Hashtable Then
-                    If hf.ContainsKey(tag) Then
-                        tag_value = hf(tag)
+                    'special name tags - ROOT_URL and ROOT_DOMAIN - hardcoded here because of too frequent usage in the site
+                    If tag = "ROOT_URL" OrElse tag = "ROOT_DOMAIN" Then
+                        tag_value = fw.config("ROOT_URL")
+                        If tag_value Is Nothing Then tag_value = ""
+                    Else
+                        If hf.ContainsKey(tag) Then
+                            tag_value = hf(tag)
+                            If tag_value Is Nothing Then tag_value = ""
+                        End If
+                        'here tag_value could be Nothing, if no such tag in Hashtable
                     End If
+
                 ElseIf tag = "ROOT_URL" Then
                     tag_value = fw.config("ROOT_URL")
+                    If tag_value Is Nothing Then tag_value = ""
+
                 ElseIf tag = "ROOT_DOMAIN" Then
                     tag_value = fw.config("ROOT_DOMAIN")
+                    If tag_value Is Nothing Then tag_value = ""
+
                 End If
             End If
         Catch ex As Exception
             fw.logger("WARN", "ParsePage - error in hvalue for tag [" & tag & "]:" & ex.Message)
         End Try
 
-        If tag_value Is Nothing Then tag_value = ""
         Return tag_value
     End Function
     ' Check for misc if attrs
@@ -429,6 +453,7 @@ Public Class ParsePage
         If eqvar Is Nothing OrElse eqvar = "" Then Return False 'return false if var need to be compared is empty
 
         Dim eqvalue As Object = hfvalue(eqvar, hf)
+        If eqvalue Is Nothing Then eqvalue = ""
         'detect if eqvalue is integer
         Try
             If RX_ALL_DIGITS.IsMatch(eqvalue.ToString()) Then eqvalue = Convert.ToInt32(eqvalue)
@@ -440,6 +465,7 @@ Public Class ParsePage
         If attrs.ContainsKey("value") OrElse attrs.ContainsKey("vvalue") Then
             If attrs.ContainsKey("vvalue") Then
                 ravalue = hfvalue(attrs("vvalue"), hf)
+                If ravalue Is Nothing Then ravalue = ""
             Else
                 ravalue = attrs("value")
             End If
@@ -520,10 +546,11 @@ Public Class ParsePage
         Return inline_tpl
     End Function
 
+    'return ready HTML
     Private Function _attr_repeat(ByRef attrs As Hashtable, ByRef tag As String, ByRef tag_val_array As Object, ByRef tpl_name As String, ByRef inline_tpl As String) As String
         'Validate: if input doesn't contain array - return "" - nothing to repeat
         If Not TypeOf (tag_val_array) Is ArrayList Then
-            If tag_val_array <> "" Then
+            If tag_val_array IsNot Nothing AndAlso tag_val_array.ToString() <> "" Then
                 fw.logger("WARN", "ParsePage - Not an ArrayList passed to repeat tag=" & tag)
             End If
             Return ""
@@ -623,7 +650,8 @@ Public Class ParsePage
                     attr_count -= 1
                 End If
                 If attr_count > 0 AndAlso hattrs.ContainsKey("number_format") Then
-                    value = FormatNumber(value, 2)
+                    Dim precision = IIf(hattrs("number_format") > "", Utils.f2int(hattrs("number_format")), 2)
+                    value = FormatNumber(value, precision)
                     attr_count -= 1
                 End If
                 If attr_count > 0 AndAlso hattrs.ContainsKey("date") Then
@@ -680,7 +708,20 @@ Public Class ParsePage
                     attr_count -= 1
                 End If
                 If attr_count > 0 AndAlso hattrs.ContainsKey("markdown") Then
-                    value = CommonMarkConverter.Convert(value)
+                    Try
+                        If aCommonMark Is Nothing Then
+                            'try to dynamic load CommonMark
+                            aCommonMark = Reflection.Assembly.Load("CommonMark")
+                            tCommonMarkConverter = aCommonMark.GetType("CommonMark.CommonMarkConverter")
+                            mConvert = tCommonMarkConverter.GetMethod("Convert", New Type() {GetType(String), aCommonMark.GetType("CommonMark.CommonMarkSettings")})
+                        End If
+                        'equivalent of: value = CommonMarkConverter.Convert(value)
+                        value = mConvert.Invoke(Nothing, New Object() {value, Nothing})
+                    Catch ex As Exception
+                        fw.logger("WARN", "error parsing markdown, check bin\CommonMark.dll exists")
+                        fw.logger("DEBUG", ex.Message)
+                    End Try
+
                     attr_count -= 1
                 End If
             End If
@@ -711,8 +752,10 @@ Public Class ParsePage
     Private Function _attr_select(ByVal tpl_path As String, ByRef hf As Hashtable, ByRef attrs As Hashtable) As String
         Dim result As New StringBuilder
 
-        'Dim sel_value As String = 
-        Dim asel As Array = Split(hfvalue(attrs("select"), hf), ",")
+        Dim sel_value As String = hfvalue(attrs("select"), hf)
+        If sel_value Is Nothing Then sel_value = ""
+
+        Dim asel As Array = Split(sel_value, ",")
         'trim all elements, so it would be simplier to compare
         For i As Integer = LBound(asel) To UBound(asel)
             asel(i) = Trim(asel(i))
@@ -720,7 +763,7 @@ Public Class ParsePage
 
         If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
 
-        Dim lines As ArrayList = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
+        Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
         Dim line As String
         Dim selected As String = ""
         For Each line In lines
@@ -750,13 +793,14 @@ Public Class ParsePage
     Private Function _attr_radio(ByVal tpl_path As String, ByRef hf As Hashtable, ByRef attrs As Hashtable) As String
         Dim result As New StringBuilder
         Dim sel_value As String = hfvalue(attrs("radio"), hf)
+        If sel_value Is Nothing Then sel_value = ""
 
         Dim name As String = attrs("name")
         Dim delim As String = attrs("delim") 'delimiter class
 
         If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
 
-        Dim lines As ArrayList = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
+        Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
 
         Dim i As Integer = 0
         Dim line As String
@@ -788,7 +832,13 @@ Public Class ParsePage
             str_checked = ""
             If value = sel_value Then str_checked = " checked='checked' "
 
-            result.Append("<label class='radio ").Append(delim).Append("'><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label>")
+            'Bootstrap 3 style
+            If delim = "inline" Then
+                result.Append("<label class='radio-inline'><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label>")
+            Else
+                result.Append("<div class='radio'><label><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label></div>")
+            End If
+
 
             i += 1
         Next
@@ -796,9 +846,10 @@ Public Class ParsePage
     End Function
     Private Function _attr_select_name(ByVal tpl_path As String, ByVal name As String) As String
         Dim result As String = ""
+        If name Is Nothing Then name = ""
 
         If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
-        Dim lines As ArrayList = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
+        Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
 
         Dim line As String
         For Each line In lines
