@@ -160,10 +160,10 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
   - `<~tag truncate="80" trchar="..." trword="1" trend="1">` - default values
 - `strip_tags` - remove any html tags from value
 - `trim` - remove leading and trailing space from value
-- `nl2br` - convert newline chars to <br>
+- `nl2br` - convert newline chars to `<br>`
 - `count` - ouput count of elements in value instead of value (for arrays only)
 - `lower` - convert value to lowercase
-- `upper` - convert value to lowercase
+- `upper` - convert value to uppercase
 - `default` - if value is empty, ouput default value instead
   - `<~tag default="none">`
 - `urlencode` - encode value for URLs
