@@ -5,7 +5,7 @@ ParsePage is a template parser engine, good for web development
 - [PHP](php)
 - [.NET](dot.net)
 - [Javascript](js) (limited features for now)
-- Perl
+- Perl (deprecated)
 
 ## Overview
 
@@ -143,15 +143,13 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
 - `sub` - this tag tells parser to use sub-hashtable for parse sub-template (PS variable should contain reference to hashtable)
 - `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'
 - `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates), example:
-
 ```
      <~rows repeat inline>
        <~var_in_rows> <~var_in_parent_ps parent>      
      </~rows>
 ```
 
-- `select="var"` - this tag tells parser to load file with tag name and use it as "value|display" for <select> html tag, example:
-
+- `select="var"` - this tag tells parser to load file with tag name and use it as "value|display" for `<select>` html tag, example:
 ```
      <select name="item[fcombo]">
        <option value=""> - select -
