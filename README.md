@@ -142,13 +142,22 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
     - repeat.iteration (1-based)
 - `sub` - this tag tells parser to use sub-hashtable for parse sub-template (PS variable should contain reference to hashtable)
 - `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'
-- `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates)
-- `select="var"` - this tag tells parser to load file with tag name and use it as value|display for <select> html tag, example:
+- `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates), example:
 
+```
+     <~rows repeat inline>
+       <~var_in_rows> <~var_in_parent_ps parent>      
+     </~rows>
+```
+
+- `select="var"` - this tag tells parser to load file with tag name and use it as "value|display" for <select> html tag, example:
+
+```
      <select name="item[fcombo]">
-     <option value=""> - select -
-     <~./fcombo.sel select="fcombo">
+       <option value=""> - select -
+       <~./fcombo.sel select="fcombo">
      </select>
+```
 
 - `radio="var" name="YYY" [delim="ZZZ"]` - this tag tell parser to load file and use it as value|display for <input type=radio> html tags, example: `<~fradio.sel radio="fradio" name="item[fradio]" delim="&nbsp;">`
 - `selvalue="var"` - display value (fetched from the tag name file) for the var (example: to display 'select' and 'radio' values in List view), example: `<~fcombo.sel selvalue="fcombo">`
