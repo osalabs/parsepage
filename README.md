@@ -253,6 +253,29 @@ User: John (user)
         John, Emma, Walter
       </td>
     </tr>
+    <tr>
+      <td>
+<pre lang="php">
+'rows' => db_array('select fname from users')
+</pre>
+      </td>
+      <td>
+
+```
+  <~rows repeat>
+```
+
+rows.html template file:
+```
+  <~fname>
+  <~comma unless="repeat.last">,</~comma>
+```
+
+</td>
+      <td>
+        John, Emma, Walter
+      </td>
+    </tr>
   </tbody>
 </table>
 
