@@ -140,8 +140,47 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
     - repeat.total (total number of items)
     - repeat.index  (0-based)
     - repeat.iteration (1-based)
+
+<table>
+  <thead>
+    <tr><th>PS</th><th>Template</th><th>Output</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+<pre lang="php">
+'rows' => db_array('select fname from users')
+</pre>
+      </td>
+      <td>
+<pre>
+<~rows repeat inline>
+  <~fname>
+  <~comma unless="repeat.last">,< /~comma>
+< /~rows>
+</pre>
+      </td>
+      <td>
+        John, Emma, Walter
+      </td>
+    </tr>
+  </tbody>
+</table>
+
 - `sub` - this tag tells parser to use sub-hashtable for parse sub-template (PS variable should contain reference to hashtable)
-- `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'
+- `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'. In case of 'if' tag name doesn't really matter and not need to exists in PS. **Note** if you have 2 or more inline tags with exactly the same name and attributes in same template file, content of all of them will be replaced by inline sub-template of the first tag. In the example below it will output "sold!" in both cases (i.e. not "already sold"):
+  - workaround for this - use different labels. For below example just add "2" like `<~somelabel2...</~somelabel2>`
+```
+     <~somelabel inline if="is_sold">
+       <div>sold!</div>
+     </~somelabel>
+     ...other content in same file...
+     <~somelabel inline if="is_sold">
+       <div>already sold</div>
+     </~somelabel>
+```
+  
+
 - `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates), example:
 ```
      <~rows repeat inline>
@@ -180,6 +219,16 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
 
 - `<~session[var]>` - this tag is a SESSION variable, not in PS hashtable (for PHP it's $_SESSION, for ASP.NET it's current context's HttpSessionState object)
 - `<~global[var]>` - this tag is a global var, not in PS hashtable (for PHP it's $_GLOBALS, for ASP.NET it depends on framework global storage - TODO remove dependency)
+
+### Commenting tags
+
+- to comment a `<~sometag>` so it won't be displayed just prepend some char to it's name, like '#', for example: `<~#sometag>` (it's just a simple workaround assuming you don't have '#sometag' var in PS and there are no such filename in your template dir).
+- to comment an inline tag like `<~rows repeat inline>...</~rows>`, just wrap it into other inline tag with false condition, for example:
+```
+  <~hide if="#" inline>
+    <~rows repeat inline>...</~rows>
+  </~hide>
+```
 
 ### Multi-language support
 
