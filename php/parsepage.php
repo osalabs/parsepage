@@ -3,7 +3,7 @@
  ParsePage - Site Template Parser
 
  Part of PHP osa framework  www.osalabs.com/osafw/php
- (c) 2009-2015 Oleg Savchuk www.osalabs.com
+ (c) 2009-2017 Oleg Savchuk www.osalabs.com
 
  2006-07-15 Oleg Savchuk - fixed inline tags parsing
  2006-12-30 - fixed parse_page_sort_tags (added \b)
@@ -45,6 +45,7 @@
  2014-11-20 - fixed: tag_if better compares values
  2014-11-25 - changed to use $CONFIG global var instead site_root, site_templ...
  2014-11-28 - fixed: sec2date now detect '0000-00-00 00:00:00' and return empty string
+ 2017-03-08 - fixed: quote special PHP $ and \\12345
 */
 require_once dirname(__FILE__)."/lock.php";
 
@@ -183,7 +184,7 @@ function parse_page($basedir, $tpl_name, $hf, $out_filename='', $page='', $paren
     if (count($tags_full)>0){   //if there are no tags found - dont' parse it
        $hf['ROOT_URL']=$CONFIG['ROOT_URL'];
        $hf['ROOT_DIR']=$CONFIG['SITE_ROOT'];
-       $hf['LANG']=$GLOBALS['LANG'];
+       $hf['LANG']=$CONFIG['LANG'];
        // rw("hf=".count($hf)." ");
 
        //re-sort $tags_full, so all 'inline' and 'sub' tags will be parsed first
@@ -532,9 +533,7 @@ function tag_replace_raw($page, $tag_full, $value, $is_inline){
     $restr='/'.preg_quote($PARSE_PAGE_OPEN_TAG.$tag_full.$PARSE_PAGE_CLOSE_TAG, '/').".*?".preg_quote($PARSE_PAGE_OPENEND_TAG.$tag.$PARSE_PAGE_CLOSE_TAG, '/').'/si';
 
     #quote special PHP $ and \\12345
-    //$value=preg_replace('/\\\\(d+)/', '\\\\$1', $value);
-    $value=preg_replace('/\\\\/', '\\\\\\\\', $value);  //better
-    $value=str_replace('$', '\$', $value);              //order is important
+    $value=str_replace(array('\\', '$'), array('\\\\', '\\$'), $value); //even better, order is important
 
     return preg_replace($restr, $value ,$page);
 

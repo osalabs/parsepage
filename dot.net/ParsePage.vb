@@ -65,10 +65,12 @@
 'session - this tag is a $_SESSION var, not in $hf hash
 ' session[var] - also possible
 'TODO parent - this tag is a $parent_hf var, not in current $hf hash
-'select="var" - this tag tell parser to load file and use it as value|display for <select> tag, example:
+'select="var" - this tag tell parser to either load file with tag name and use it as value|display for <select> tag
+'               or if variable with tag name exists - use it as arraylist of hashtables with id/iname keys
+'     , example:
 '     <select name="item[fcombo]">
 '     <option value=""> - select -
-'     <~./fcombo.sel select="fcombo">
+'     <~./fcombo.sel select="fcombo">  or <~fcombo_options select="fcombo">
 '     </select>
 'radio="var" name="YYY" [delim="inline"]- this tag tell parser to load file and use it as value|display for <input type=radio> tags, Bootsrtrap 3 style, example:
 '     <~./fradio.sel radio="fradio" name="item[fradio]" delim="inline">
@@ -83,7 +85,11 @@
 '           english string === lang string
 'support modifiers:
 ' htmlescape
-' date          - sample "d M yyyy HH:mm", see https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx
+' date          - format as datetime, sample "d M yyyy HH:mm", see https://docs.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings
+'       <~var date>         output "m/d/yyyy" - date only (TODO - should be formatted per user settings actually)
+'       <~var date="short"> output "m/d/yyyy hh:mm" - date and time short (to mins)
+'       <~var date="long">  output "m/d/yyyy hh:mm:ss" - date and time long
+'       <~var date="sql">   output "yyyy-mm-dd hh:mm:ss" - sql date and time
 ' url           - add http:// to begin of string if absent
 ' number_format - FormatNumber(value, 2) => 12345.12
 ' truncate      - truncate with options <~tag truncate="80" trchar="..." trword="1" trend="1">
@@ -96,11 +102,10 @@
 ' capitalize        - capitalize first word, capitalize=all - capitalize all words
 ' default
 ' urlencode
-' TODO var2js
-' markdown - convert markdown text to html using CommonMark.NET. Note: may wrap tag with <p>
+' json (was var2js) - produces json-compatible string, example: {success:true, msg:""}
+' markdown - convert markdown text to html using CommonMark.NET (optional). Note: may wrap tag with <p>
 
 Imports System.IO
-Imports Newtonsoft.Json
 
 Public Class ParsePage
     Private Shared RX_NOTS As New Regex("^(\S+)", RegexOptions.Compiled)
@@ -117,7 +122,10 @@ Public Class ParsePage
     Private Shared FILE_CACHE As New Hashtable
     Private Shared IFOPERS() As String = {"if", "unless", "ifne", "ifeq", "ifgt", "iflt", "ifge", "ifle"}
 
-    Private Shared DEF_DATE_FORMAT As String = "M/d/yyyy" ' for US
+    Private Shared DATE_FORMAT_DEF As String = "M/d/yyyy" ' for US, TODO make based on user settigns (with fallback to server's settings)
+    Private Shared DATE_FORMAT_SHORT As String = "M/d/yyyy HH:mm"
+    Private Shared DATE_FORMAT_LONG As String = "M/d/yyyy HH:mm:ss"
+    Private Shared DATE_FORMAT_SQL As String = "yyyy-MM-dd HH:mm:ss"
     '"d M yyyy HH:mm"
 
     'for dynamic load of CommonMark markdown converter
@@ -125,23 +133,33 @@ Public Class ParsePage
     Private Shared mConvert As Reflection.MethodInfo
 
     Private fw As FW
+    'checks if template files modifies and reload them, depends on config's "log_level"
+    'true if level at least DEBUG, false for production as on production there are no tempalte file changes (unless during update, which leads to restart App anyway)
+    Private is_check_file_modifications As Boolean = False
     Private TMPL_PATH As String
     Private basedir As String = ""
 
     Public Sub New(fw As FW)
         Me.fw = fw
         TMPL_PATH = fw.config("template")
+        is_check_file_modifications = fw.config("log_level") >= LogLevel.DEBUG
     End Sub
 
     Public Function parse_json(ByVal hf As Object) As String
-        Return JsonConvert.SerializeObject(hf)
+        Return Utils.jsonEncode(hf)
     End Function
 
 
     Public Function parse_page(ByVal bdir As String, ByVal tpl_name As String, ByVal hf As Hashtable) As String
         basedir = bdir
         Dim parent_hf As Hashtable = New Hashtable
-        Return _parse_page(tpl_name, hf, "", "", parent_hf)
+        'Return _parse_page(tpl_name, hf, "", "", parent_hf)
+
+        Dim start_time = DateTime.Now
+        Dim result = _parse_page(tpl_name, hf, "", "", parent_hf)
+        Dim end_timespan As TimeSpan = DateTime.Now - start_time
+        fw.logger("ParsePage speed: " & String.Format("{0:0.000}", 1 / end_timespan.TotalSeconds) & "/s")
+        Return result
     End Function
 
     Public Function parse_string(tpl As String, hf As Hashtable) As String
@@ -205,14 +223,25 @@ Public Class ParsePage
                             Dim value As String
                             If attrs.ContainsKey("repeat") Then
                                 value = _attr_repeat(attrs, tag, tag_value, tpl_name, inline_tpl)
+                            ElseIf attrs.ContainsKey("select") Then
+                                ' this is special case for '<select>' HTML tag when options passed as ArrayList
+                                value = _attr_select(tag, tpl_name, hf, attrs)
+                            ElseIf attrs.ContainsKey("selvalue") Then
+                                '    # this is special case for '<select>' HTML tag
+                                value = _attr_select_name(tag, tpl_name, hf, attrs)
+                                If Not attrs.ContainsKey("noescape") Then value = Utils.htmlescape(value)
                             ElseIf attrs.ContainsKey("sub") Then
                                 If Not TypeOf (tag_value) Is Hashtable Then
-                                    fw.logger("WARN", "ParsePage - not a Hash passed for a SUB tag=" & tag)
+                                    fw.logger(LogLevel.DEBUG, "ParsePage - not a Hash passed for a SUB tag=", tag)
                                     tag_value = New Hashtable
                                 End If
                                 value = _parse_page(tag_tplpath(tag, tpl_name), tag_value, "", inline_tpl, parent_hf)
                             Else
-                                value = tag_value.ToString()
+                                If attrs.ContainsKey("json") Then
+                                    value = Utils.jsonEncode(tag_value)
+                                Else
+                                    value = tag_value.ToString()
+                                End If
                                 If value > "" AndAlso Not attrs.ContainsKey("noescape") Then value = Utils.htmlescape(value)
                             End If
                             tag_replace(page, tag_full, value, attrs)
@@ -224,11 +253,11 @@ Public Class ParsePage
                             tag_replace(page, tag_full, "", attrs)
                         ElseIf attrs.ContainsKey("select") Then
                             '    # this is special case for '<select>' HTML tag
-                            v = _attr_select(tag_tplpath(tag, tpl_name), hf, attrs)
+                            v = _attr_select(tag, tpl_name, hf, attrs)
                             tag_replace(page, tag_full, v, attrs)
                         ElseIf attrs.ContainsKey("selvalue") Then
                             '    # this is special case for '<select>' HTML tag
-                            v = _attr_select_name(tag_tplpath(tag, tpl_name), hfvalue(attrs("selvalue"), hf))
+                            v = _attr_select_name(tag, tpl_name, hf, attrs)
                             If Not attrs.ContainsKey("noescape") Then v = Utils.htmlescape(v)
                             tag_replace(page, tag_full, v, attrs)
                         ElseIf attrs.ContainsKey("radio") Then
@@ -240,7 +269,7 @@ Public Class ParsePage
                             '    #also checking for sub
                             If attrs.ContainsKey("sub") Then
                                 If Not TypeOf (tag_value) Is Hashtable Then
-                                    fw.logger("WARN", "ParsePage - not a Hash passed for a SUB tag=" & tag)
+                                    fw.logger(LogLevel.DEBUG, "ParsePage - not a Hash passed for a SUB tag=", tag)
                                     tag_value = New Hashtable
                                 End If
                                 v = _parse_page(tag_tplpath(tag, tpl_name), tag_value, "", inline_tpl, parent_hf)
@@ -250,9 +279,9 @@ Public Class ParsePage
                             tag_replace(page, tag_full, v, attrs)
                         End If
 
-                        Else
-                            tag_replace(page, tag_full, "", attrs)
-                        End If
+                    Else
+                        tag_replace(page, tag_full, "", attrs)
+                    End If
 
                 Next tag_match
             End If
@@ -273,7 +302,7 @@ Public Class ParsePage
         If FILE_CACHE.ContainsKey(filename) Then
             Dim cached_item As Hashtable = FILE_CACHE(filename)
             'if debug is off - don't check modify time for better performance (but app restart would be necessary if template changed)
-            If fw.config("is_debug") Then
+            If is_check_file_modifications Then
                 modtime = File.GetLastWriteTime(filename)
                 Dim mtmp As String = cached_item("modtime")
                 If mtmp = "" OrElse mtmp = modtime Then
@@ -283,18 +312,17 @@ Public Class ParsePage
                 Return cached_item("data")
             End If
         Else
-            If fw.config("is_debug") Then modtime = File.GetLastWriteTime(filename)
+            If is_check_file_modifications Then modtime = File.GetLastWriteTime(filename)
         End If
 
         'fw.logger("try load file " & filename)
         'get from fs(if not in cache)
         If File.Exists(filename) Then
-            file_data = fw.get_file_content(filename)
-            If fw.config("is_debug") AndAlso modtime = "" Then modtime = File.GetLastWriteTime(filename)
+            file_data = FW.get_file_content(filename)
+            If is_check_file_modifications AndAlso modtime = "" Then modtime = File.GetLastWriteTime(filename)
         End If
 
         'get from fs(if not in cache)
-        file_data = fw.get_file_content(filename)
         Dim cache As Hashtable = New Hashtable
         cache("data") = file_data
         cache("modtime") = modtime
@@ -409,7 +437,7 @@ Public Class ParsePage
                 ElseIf TypeOf (hf) Is Hashtable Then
                     'special name tags - ROOT_URL and ROOT_DOMAIN - hardcoded here because of too frequent usage in the site
                     If tag = "ROOT_URL" OrElse tag = "ROOT_DOMAIN" Then
-                        tag_value = fw.config("ROOT_URL")
+                        tag_value = fw.config(tag)
                         If tag_value Is Nothing Then tag_value = ""
                     Else
                         If hf.ContainsKey(tag) Then
@@ -430,7 +458,7 @@ Public Class ParsePage
                 End If
             End If
         Catch ex As Exception
-            fw.logger("WARN", "ParsePage - error in hvalue for tag [" & tag & "]:" & ex.Message)
+            fw.logger(LogLevel.DEBUG, "ParsePage - error in hvalue for tag [", tag, "]:", ex.Message)
         End Try
 
         Return tag_value
@@ -550,7 +578,7 @@ Public Class ParsePage
         'Validate: if input doesn't contain array - return "" - nothing to repeat
         If Not TypeOf (tag_val_array) Is ArrayList Then
             If tag_val_array IsNot Nothing AndAlso tag_val_array.ToString() <> "" Then
-                fw.logger("WARN", "ParsePage - Not an ArrayList passed to repeat tag=" & tag)
+                fw.logger(LogLevel.DEBUG, "ParsePage - Not an ArrayList passed to repeat tag=", tag)
             End If
             Return ""
         End If
@@ -650,17 +678,26 @@ Public Class ParsePage
                 End If
                 If attr_count > 0 AndAlso hattrs.ContainsKey("number_format") Then
                     Dim precision = IIf(hattrs("number_format") > "", Utils.f2int(hattrs("number_format")), 2)
-                    value = FormatNumber(value, precision)
+                    Dim groupdigits = IIf(hattrs.ContainsKey("nfthousands") AndAlso hattrs("nfthousands") = "", TriState.False, TriState.True) 'default - group digits, but if nfthousands empty - don't
+                    value = FormatNumber(Utils.f2float(value), precision, TriState.UseDefault, TriState.False, groupdigits)
                     attr_count -= 1
                 End If
                 If attr_count > 0 AndAlso hattrs.ContainsKey("date") Then
                     Dim dformat As String = hattrs("date")
-                    'If dformat = "" Then dformat = "d M yyyy HH:mm"
-                    If dformat = "" Then dformat = DEF_DATE_FORMAT
-                        Dim dt As DateTime
-                        If DateTime.TryParse(value, dt) Then
-                            value = dt.ToString(dformat, System.Globalization.DateTimeFormatInfo.InvariantInfo)
-                        End If
+                    Select Case dformat
+                        Case ""
+                            dformat = DATE_FORMAT_DEF
+                        Case "short"
+                            dformat = DATE_FORMAT_SHORT
+                        Case "long"
+                            dformat = DATE_FORMAT_LONG
+                        Case "sql"
+                            dformat = DATE_FORMAT_SQL
+                    End Select
+                    Dim dt As DateTime
+                    If DateTime.TryParse(value, dt) Then
+                        value = dt.ToString(dformat, System.Globalization.DateTimeFormatInfo.InvariantInfo)
+                    End If
                     attr_count -= 1
                 End If
                 If attr_count > 0 AndAlso hattrs.ContainsKey("trim") Then
@@ -754,7 +791,7 @@ Public Class ParsePage
     End Sub
 
     'attrs("select") can contain strings with separator "," for multiple select
-    Private Function _attr_select(ByVal tpl_path As String, ByRef hf As Hashtable, ByRef attrs As Hashtable) As String
+    Private Function _attr_select(tag As String, tpl_name As String, ByRef hf As Hashtable, ByRef attrs As Hashtable) As String
         Dim result As New StringBuilder
 
         Dim sel_value As String = hfvalue(attrs("select"), hf)
@@ -766,32 +803,63 @@ Public Class ParsePage
             asel(i) = Trim(asel(i))
         Next
 
-        If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
+        If hf.ContainsKey(tag) Then
+            ' hf(tag) is ArrayList of Hashes with "id" and "iname" keys, for example rows returned from db.array('select id, iname from ...')
+            ' "id" key is optional, if not present - iname will be used for values too
+            If Not (TypeOf hf(tag) Is ICollection) Then
+                fw.logger(LogLevel.DEBUG, "ParsePage - not an ArrayList or Hashtables passed for a select tag=", tag)
+                Return ""
+            End If
 
-        Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
-        Dim line As String
-        Dim selected As String = ""
-        For Each line In lines
-            If line.Length < 2 Then Continue For
-            '            line.chomp()
-            Dim arr() As String = Split(line, "|", 2)
-            Dim value As String = Trim(arr(0))
-            Dim desc As String = arr(1)
-
-            If desc.Length < 1 Then Continue For
-            _replace_commons(desc)
-            If Not attrs.ContainsKey("noescape") Then
+            Dim value As String, desc As String
+            For Each item As Hashtable In hf(tag)
+                desc = Utils.htmlescape(item("iname"))
+                If item.ContainsKey("id") Then
+                    value = Trim(item("id"))
+                Else
+                    value = Trim(item("iname"))
+                End If
                 value = Utils.htmlescape(value)
-                desc = Utils.htmlescape(desc)
-            End If
+                _replace_commons(desc)
 
-            If Array.IndexOf(asel, value) <> -1 Then
-                selected = " selected"
-            Else
-                selected = ""
-            End If
-            result.Append("<option value=""").Append(value).Append("""").Append(selected).Append(">").Append(desc).Append("</option>")
-        Next
+                result.Append("<option value=""").Append(value).Append("""")
+                If Array.IndexOf(asel, value) <> -1 Then
+                    result.Append(" selected ")
+                End If
+                result.Append(">").Append(desc).Append("</option>" & vbCrLf)
+            Next
+
+        Else
+            'just read from the plain text file
+            Dim tpl_path = tag_tplpath(tag, tpl_name)
+            If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
+
+            Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
+            Dim line As String
+            Dim selected As String = ""
+            For Each line In lines
+                If line.Length < 2 Then Continue For
+                '            line.chomp()
+                Dim arr() As String = Split(line, "|", 2)
+                Dim value As String = Trim(arr(0))
+                Dim desc As String = arr(1)
+
+                If desc.Length < 1 Then Continue For
+                _replace_commons(desc)
+                If Not attrs.ContainsKey("noescape") Then
+                    value = Utils.htmlescape(value)
+                    desc = Utils.htmlescape(desc)
+                End If
+
+                If Array.IndexOf(asel, value) <> -1 Then
+                    selected = " selected"
+                Else
+                    selected = ""
+                End If
+                result.Append("<option value=""").Append(value).Append("""").Append(selected).Append(">").Append(desc).Append("</option>")
+            Next
+        End If
+
         Return result.ToString
     End Function
 
@@ -828,48 +896,74 @@ Public Class ParsePage
                 desc = Utils.htmlescape(desc)
             End If
 
-            'FW.logger("BBB" + name)
-            Dim name_id As String = name + i.ToString
-            'name_id = Regex.Replace(name_id, "[\[\]]", "_")
-            name_id = Replace(name_id, "[", "_")
-            name_id = Replace(name_id, "]", "_")
-
+            Dim name_id As String = name & "$" & i.ToString
             str_checked = ""
             If value = sel_value Then str_checked = " checked='checked' "
 
-            'Bootstrap 3 style
-            If delim = "inline" Then
-                result.Append("<label class='radio-inline'><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label>")
-            Else
-                result.Append("<div class='radio'><label><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label></div>")
-            End If
+            ''Bootstrap 3 style
+            'If delim = "inline" Then
+            '    result.Append("<label class='radio-inline'><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label>")
+            'Else
+            '    result.Append("<div class='radio'><label><input type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append(">").Append(desc).Append("</label></div>")
+            'End If
 
+            'Bootstrap 4 style
+            result.Append("<div class='custom-control custom-radio ").Append(delim).Append("'><input class='custom-control-input' type='radio' name=""").Append(name).Append(""" id=""").Append(name_id).Append(""" value=""").Append(value).Append("""").Append(str_checked).Append("><label class='custom-control-label' for='").Append(name_id).Append("'>").Append(desc).Append("</label></div>")
 
             i += 1
         Next
         Return result.ToString
     End Function
-    Private Function _attr_select_name(ByVal tpl_path As String, ByVal name As String) As String
+    Private Function _attr_select_name(tag As String, tpl_name As String, ByRef hf As Hashtable, ByRef attrs As Hashtable) As String
         Dim result As String = ""
-        If name Is Nothing Then name = ""
+        Dim sel_value As String = hfvalue(attrs("selvalue"), hf)
+        If sel_value Is Nothing Then sel_value = ""
 
-        If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
-        Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
+        If hf.ContainsKey(tag) Then
+            ' hf(tag) is ArrayList of Hashes with "id" and "iname" keys, for example rows returned from db.array('select id, iname from ...')
+            ' "id" key is optional, if not present - iname will be used for values too
+            If Not (TypeOf hf(tag) Is ICollection) Then
+                fw.logger(LogLevel.DEBUG, "ParsePage - not an ArrayList or Hashtables passed for a selvalue tag=", tag)
+                Return ""
+            End If
 
-        Dim line As String
-        For Each line In lines
-            If line.Length < 2 Then Continue For
-            '            line.chomp()
-            Dim arr() As String = Split(line, "|", 2)
-            Dim value As String = arr(0)
-            Dim desc As String = arr(1)
+            Dim value As String, desc As String
+            For Each item As Hashtable In hf(tag)
+                If item.ContainsKey("id") Then
+                    value = Trim(item("id"))
+                Else
+                    value = Trim(item("iname"))
+                End If
+                desc = item("iname")
 
-            If desc.Length < 1 Or value <> name Then Continue For
-            _replace_commons(desc)
+                If desc.Length < 1 Or value <> sel_value Then Continue For
+                _replace_commons(desc)
 
-            result = desc
-            Exit For
-        Next
+                result = desc
+                Exit For
+            Next
+
+        Else
+
+            Dim tpl_path = tag_tplpath(tag, tpl_name)
+            If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
+            Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
+
+            Dim line As String
+            For Each line In lines
+                If line.Length < 2 Then Continue For
+                '            line.chomp()
+                Dim arr() As String = Split(line, "|", 2)
+                Dim value As String = arr(0)
+                Dim desc As String = arr(1)
+
+                If desc.Length < 1 Or value <> sel_value Then Continue For
+                _replace_commons(desc)
+
+                result = desc
+                Exit For
+            Next
+        End If
 
         Return result
     End Function
