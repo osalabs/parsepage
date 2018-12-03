@@ -5,7 +5,7 @@ ParsePage is a template parser engine, good for web development
 - [PHP](php)
 - [.NET](dot.net)
 - [Javascript](js) (limited features for now)
-- Perl
+- Perl (deprecated)
 
 ## Overview
 
@@ -25,14 +25,14 @@ TODO - add image here how templates works
 
 ### Sample main template:
 
-_/page_tpl.html_
+_/layout.html_
 ```html
 <!DOCTYPE html>
 <html lang="en"><head></head>
 <body>
   <h1><~title></h1>
   <~main>
-  <footer>site footer<footer>
+  <~/common/footer>
 </body>
 </html>
 ```
@@ -50,14 +50,34 @@ _/test/main.html_
 <p><~more_data></p>
 ```
 
+### Common Sub-templates:
+
+_/common/footer.html_
+```html
+<footer>site footer<footer>
+```
+
 ### Sample code.
-This will load `page_tpl.html` layout and insert/parse sub-templates from `/test` directory, then output to browser;
+This will load `layout.html` layout and insert/parse sub-templates from `/test` directory, then output to browser;
 ```php
 $ps=array(
   'data' => 'Hello World!',
   'more_data' => 12345,
 );
-parse_page('/test', '/page_tpl.html', $ps);
+parse_page('/test', '/layout.html', $ps);
+```
+
+this will output:
+```html
+<!DOCTYPE html>
+<html lang="en"><head></head>
+<body>
+  <h1>Test page header</h1>
+  <p>Hello World!</p>
+  <p>12345</p>
+  <footer>site footer<footer>
+</body>
+</html>
 ```
 
 ## Documentation
@@ -65,12 +85,12 @@ parse_page('/test', '/page_tpl.html', $ps);
 ### /template directory structure
 
 All templates should be placed under single directory accessible by website code, we name it `/template` (relative to website root).
-Sample stucture:
+**Sample** structure:
 ```
-page_tpl.html  - main template for website pages
-page_tpl_print.html - main template for printed pages
-page_tpl_layout2.html - main template for website pages with layout 2
-common/ - directory with common sub-templates
+layout.html  - main template for website pages
+layout_print.html - main template for printed pages
+layout_simple.html - main template for website pages with some simpler layout
+common/ - directory with common sub-templates used by multiple layouts
 home/ - directory with sub-templates for website Home page
 contact/ - directory with sub-templates for website Contact page
 ```
@@ -106,6 +126,49 @@ Tags in templates should be in `<~tag_name [optional attributes]>` format.
 
 Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use `noescape` attr: `<~raw_variable noescape>`
 
+<table>
+  <thead><tr><th>PS</th><th>Template</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>
+<pre lang="php">
+'username' => 'John',
+'user' => array(
+  'id' => 123,
+  'status' => 'Active'
+),
+'orders' => array(
+  array(
+    'no'=>1,
+    'item'=>'Pen'
+  ),
+  array(
+    'no'=>2,
+    'item'=>'Pencil'
+  )
+),
+'csrf' => '&lt;b&gt;test&lt;/b&gt;',
+</pre>
+      </td>
+      <td>
+<pre>
+User: <~username><br>
+Status: <~user[status]><br>
+First item: <~orders[0][item]><br>
+Test: <~csrf>
+</pre>
+      </td>
+      <td>
+User: John<br>
+Status: Active<br>
+First item: Pen<br>
+Test: &lt;b&gt;test&lt;/b&gt;
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+
 ### Supported attributes
 
 - `var` - tag is variable, no fileseek necessary even if no such variable passed to ParsePage: `<~tag var>`
@@ -132,6 +195,32 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
       - false (boolean)
       - ''
       - unset/undefined variable
+
+<table>
+  <thead><tr><th>PS</th><th>Template</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>
+<pre lang="php">
+'username' => 'John',
+'is_logged' => true,
+'is_admin' => false,
+</pre>
+      </td>
+      <td>
+<pre>
+User: <~username if="is_logged">
+<~adm if="is_admin" inline>(admin)< /~adm>
+<~usr unless="is_admin" inline>(user)< /~usr>
+</pre>
+      </td>
+      <td>
+User: John (user)
+      </td>
+    </tr>
+  </tbody>
+</table>
+
 - `repeat` - this tag is repeat content (PS should contain reference to array of hashtables),
   - `<~tag repeat inline>repeated sub-template content</~tag>` - inline sample
   - inside repeat sub-template supported repeat vars:
@@ -140,18 +229,125 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
     - repeat.total (total number of items)
     - repeat.index  (0-based)
     - repeat.iteration (1-based)
-- `sub` - this tag tells parser to use sub-hashtable for parse sub-template (PS variable should contain reference to hashtable)
-- `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'
-- `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates)
-- `select="var"` - this tag tells parser to load file with tag name and use it as value|display for <select> html tag, example:
 
-     <select name="item[fcombo]">
-     <option value=""> - select -
-     <~./fcombo.sel select="fcombo">
+<table>
+  <thead>
+    <tr><th>PS</th><th>Template</th><th>Output</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+<pre lang="php">
+'rows' => db_array('select fname from users')
+</pre>
+      </td>
+      <td>
+<pre>
+<~rows repeat inline>
+  <~fname>
+  <~comma unless="repeat.last">,< /~comma>
+< /~rows>
+</pre>
+      </td>
+      <td>
+        John, Emma, Walter
+      </td>
+    </tr>
+    <tr>
+      <td>
+<pre lang="php">
+'rows' => db_array('select fname from users')
+</pre>
+      </td>
+      <td>
+
+```
+  <~rows repeat>
+```
+
+rows.html template file:
+```
+  <~fname>
+  <~comma unless="repeat.last">,</~comma>
+```
+
+</td>
+      <td>
+        John, Emma, Walter
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+- `sub` - this tag tells parser to use sub-hashtable for parse sub-template (PS variable should contain reference to hashtable)
+- `inline` - this tag tells parser that sub-template is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'. In case of 'if' tag name doesn't really matter and not need to exists in PS. **Note** if you have 2 or more inline tags with exactly the same name and attributes in same template file, content of all of them will be replaced by inline sub-template of the first tag. In the example below it will output "sold!" in both cases (i.e. not "already sold"):
+  - workaround for this - use different labels. For below example just add "2" like `<~somelabel2...</~somelabel2>`
+  - **Important - use `</~tag>` for closing tags, i.e. backslash then tilde**
+```
+     <~somelabel inline if="is_sold">
+       <div>sold!</div>
+     </~somelabel>
+     ...other content in same file...
+     <~somelabel inline if="is_sold">
+       <div>already sold</div>
+     </~somelabel>
+```
+  
+
+- `parent` - this tag need to be read from paren't PS var, not in current PS hashtable (usually used inside `repeat` sub-templates), example:
+```
+     <~rows repeat inline>
+       <~var_in_rows> <~var_in_parent_ps parent>      
+     </~rows>
+```
+
+- `select="var"` - this tag tells parser to load file with tag name and use it as "value|display" for `<select>` html tag, example:
+```
+     <select name="item[fruit]">
+       <option value=""> - select a fruit -</option>
+       <~./fruits.sel select="fruit">
      </select>
+     
+     and file fruits.sel contains:
+     10|Apple
+     20|Cherry
+     30|Grape
+     
+     if, for example, PS contains 'fruit'=>10, then Apple will be selected by default.
+```
 
 - `radio="var" name="YYY" [delim="ZZZ"]` - this tag tell parser to load file and use it as value|display for <input type=radio> html tags, example: `<~fradio.sel radio="fradio" name="item[fradio]" delim="&nbsp;">`
 - `selvalue="var"` - display value (fetched from the tag name file) for the var (example: to display 'select' and 'radio' values in List view), example: `<~fcombo.sel selvalue="fcombo">`
+  - **Note**, it doesn't work for direct values, you can't write `<~fcombo.sel selvalue="10">`. Instead put 10 into PS var and use var name.
+
+<table>
+  <thead>
+    <tr><th>PS</th><th>Template</th><th>Output</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+<pre lang="php">
+'fruit' => 20
+</pre>
+      </td>
+      <td>
+<pre>
+<~fruits.sel selvalue="fruit">
+
+fruits.sel file:
+10|Apple
+20|Cherry
+30|Grape
+</pre>
+      </td>
+      <td>
+Cherry
+      </td>
+    </tr>
+  </tbody>
+</table>
+
 - `htmlescape` - replace special symbols by their html equivalents (such as <>,",'). This attribute is applied automatically to all tags by default.
 - `noescape` - will not apply htmlescape to tag value
 - `date` - will format tag value as date, format depends on language: [PHP](http://php.net/manual/en/function.date.php), [ASP.NET](https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx)
@@ -160,10 +356,10 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
   - `<~tag truncate="80" trchar="..." trword="1" trend="1">` - default values
 - `strip_tags` - remove any html tags from value
 - `trim` - remove leading and trailing space from value
-- `nl2br` - convert newline chars to <br>
+- `nl2br` - convert newline chars to `<br>`
 - `count` - ouput count of elements in value instead of value (for arrays only)
 - `lower` - convert value to lowercase
-- `upper` - convert value to lowercase
+- `upper` - convert value to uppercase
 - `default` - if value is empty, ouput default value instead
   - `<~tag default="none">`
 - `urlencode` - encode value for URLs
@@ -172,22 +368,39 @@ Note, CSRF shield integrated - all vars escaped, if var shouldn't be escaped use
 
 
 - `<~session[var]>` - this tag is a SESSION variable, not in PS hashtable (for PHP it's $_SESSION, for ASP.NET it's current context's HttpSessionState object)
-- `<~global[var]>` - this tag is a global var, not in PS hashtable (for PHP it's $_GLOBALS, for ASP.NET it depends on framework global storage - TODO remove dependency)
+- `<~global[var]>` - this tag is a global var, not in PS hashtable (for PHP it's $_GLOBALS, for ASP.NET it depends on framework global storage implementation)
+
+### Commenting tags
+
+- to comment a `<~sometag>` so it won't be displayed just prepend some char to it's name, like '#', for example: `<~#sometag>` (it's just a simple workaround assuming you don't have '#sometag' var in PS and there are no such filename in your template dir).
+- to comment an inline tag like `<~rows repeat inline>...</~rows>`, just wrap it into other inline tag with false condition, for example:
+```
+  <~hide if="#" inline>
+    <~rows repeat inline>...</~rows>
+  </~hide>
+```
 
 ### Multi-language support
 
-TODO: describe better
+PHP and ASP.NET implementations support multi-lanugage templates.
+Text that need to be replaced according to user's display language should be placed in templates between backtick characters.
+Parser then look for replacements in `/template/lang/$lang.txt` files, where `$lang` is "en", "es", "ua", for example.
+You need to create these files and fill with replacements in this format:
+```
+  english string === string in another language
+```
+Default lanugage is English, so en.txt doesn't need be created.
 
-Support \`text\` => replaced by multilang from `/template/lang/$lang.txt` according to global lang (english by default)
+For example, you have a template:
+```
+  `Hello` <~username>
+```
 
-Example: `<b>\`Hello\`</b>`
+And `/template/lang/es.txt` file for Spanish translations contains line:
+```
+    Hello === Hola
+```
 
-lang.txt line format:
+If user's language is English, parser will output `Hello John`.
+And if user's language will be Spanish, parser will output `Hola John`.
 
-    english string === string in another language
-
-
-## TODO
-- more samples
-- sample live site
-- tests
