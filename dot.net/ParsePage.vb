@@ -4,10 +4,10 @@
 ' (c) 2009-2015 Oleg Savchuk www.osalabs.com
 '
 ' supports:
-' - SESSION, GLOBAL (from fw.G), SUBHASHES, SUBARRAYS
+' - SESSION, GLOBAL (from fw.G), SUBHASHES, SUBARRAYS, PARSEPAGE.TOP, PARSEPAGE.PARENT
 ' - <~tag if="var"> - var tested for true value (1, true, >"", but not "0")
 ' - CSRF shield - all vars escaped, if var shouldn't be escaped use "noescape" attr: <~raw_variable noescape>
-' - 'attrs("select") can contain strings with separator "," for multiple select
+' - 'attrs("select") can contain strings with separator ","(or custom defined) for multiple select
 '
 '# Supported attributes:
 
@@ -58,15 +58,18 @@
 '  repeat.index  (0-based)
 '  repeat.iteration (1-based)
 
-'sub - this tag tell parser to use subhash for parse subtemplate ($hf hash should contain reference to hash)
+'sub - this tag tell parser to use subhash for parse subtemplate ($hf hash should contain reference to hash), examples:
+'   <~tag sub inline>...</~tag>- use $hf[tag] as hashtable for inline template
+'   <~tag sub="var"> - use $hf[var] as hashtable for template in "tag.html"
 'inline - this tag tell parser that subtemplate is not in file - it's between <~tag>...</~tag> , useful in combination with 'repeat' and 'if'
 'global - this tag is a global var, not in $hf hash
 ' global[var] - also possible
 'session - this tag is a $_SESSION var, not in $hf hash
 ' session[var] - also possible
 'TODO parent - this tag is a $parent_hf var, not in current $hf hash
-'select="var" - this tag tell parser to either load file with tag name and use it as value|display for <select> tag
+'select="var" [multi=","] - this tag tell parser to either load file with tag name and use it as value|display for <select> tag
 '               or if variable with tag name exists - use it as arraylist of hashtables with id/iname keys
+'             if "multi" attr defined and not empty - use it as separator for multi-values, if empty - no multi-values
 '     , example:
 '     <select name="item[fcombo]">
 '     <option value=""> - select -
@@ -138,6 +141,8 @@ Public Class ParsePage
     Private is_check_file_modifications As Boolean = False
     Private TMPL_PATH As String
     Private basedir As String = ""
+    Private data_top As Hashtable 'reference to the topmost hashtable
+    Private is_found_last_hfvalue As Boolean = False
 
     Public Sub New(fw As FW)
         Me.fw = fw
@@ -152,13 +157,14 @@ Public Class ParsePage
 
     Public Function parse_page(ByVal bdir As String, ByVal tpl_name As String, ByVal hf As Hashtable) As String
         basedir = bdir
+        Me.data_top = hf
         Dim parent_hf As Hashtable = New Hashtable
         'Return _parse_page(tpl_name, hf, "", "", parent_hf)
 
-        Dim start_time = DateTime.Now
+        'Dim start_time = DateTime.Now
         Dim result = _parse_page(tpl_name, hf, "", "", parent_hf)
-        Dim end_timespan As TimeSpan = DateTime.Now - start_time
-        fw.logger("ParsePage speed: " & String.Format("{0:0.000}", 1 / end_timespan.TotalSeconds) & "/s")
+        'Dim end_timespan As TimeSpan = DateTime.Now - start_time
+        'fw.logger("ParsePage speed: " & String.Format("{0:0.000}", 1 / end_timespan.TotalSeconds) & "/s")
         Return result
     End Function
 
@@ -169,10 +175,9 @@ Public Class ParsePage
     End Function
 
     Private Function _parse_page(ByVal tpl_name As String, ByVal hf As Hashtable, ByVal out_filename As String, ByVal page As String, ByRef parent_hf As Hashtable) As String
-        'fw.logger("DEBUG", "ParsePage - Parsing template = " + tpl_name)
-
         If Left(tpl_name, 1) <> "/" Then tpl_name = basedir + "/" + tpl_name
 
+        'fw.logger("DEBUG", "ParsePage - Parsing template = " + tpl_name + ", pagelen=" & page.Length)
         If page.Length < 1 Then page = precache_file(TMPL_PATH + tpl_name)
 
         If page.Length > 0 Then
@@ -212,17 +217,18 @@ Public Class ParsePage
                             ElseIf attrs.ContainsKey("global") Then
                                 tag_value = hfvalue(tag, fw.G)
                             Else
-                                tag_value = hfvalue(tag, hf)
+                                tag_value = hfvalue(tag, hf, parent_hf)
                             End If
                         Else
-                            tag_value = hfvalue(tag, hf)
+                            tag_value = hfvalue(tag, hf, parent_hf)
                         End If
 
+                        'fw.logger("ParsePage - tag: " & tag_full & ", found=" & is_found_last_hfvalue)
                         If tag_value.ToString().Length > 0 Then
 
                             Dim value As String
                             If attrs.ContainsKey("repeat") Then
-                                value = _attr_repeat(attrs, tag, tag_value, tpl_name, inline_tpl)
+                                value = _attr_repeat(attrs, tag, tag_value, tpl_name, inline_tpl, hf)
                             ElseIf attrs.ContainsKey("select") Then
                                 ' this is special case for '<select>' HTML tag when options passed as ArrayList
                                 value = _attr_select(tag, tpl_name, hf, attrs)
@@ -231,11 +237,7 @@ Public Class ParsePage
                                 value = _attr_select_name(tag, tpl_name, hf, attrs)
                                 If Not attrs.ContainsKey("noescape") Then value = Utils.htmlescape(value)
                             ElseIf attrs.ContainsKey("sub") Then
-                                If Not TypeOf (tag_value) Is Hashtable Then
-                                    fw.logger(LogLevel.DEBUG, "ParsePage - not a Hash passed for a SUB tag=", tag)
-                                    tag_value = New Hashtable
-                                End If
-                                value = _parse_page(tag_tplpath(tag, tpl_name), tag_value, "", inline_tpl, parent_hf)
+                                value = _attr_sub(tag, tpl_name, hf, attrs, inline_tpl, parent_hf, tag_value)
                             Else
                                 If attrs.ContainsKey("json") Then
                                     value = Utils.jsonEncode(tag_value)
@@ -247,7 +249,7 @@ Public Class ParsePage
                             tag_replace(page, tag_full, value, attrs)
 
                         ElseIf attrs.ContainsKey("repeat") Then
-                            v = _attr_repeat(attrs, tag, tag_value, tpl_name, inline_tpl)
+                            v = _attr_repeat(attrs, tag, tag_value, tpl_name, inline_tpl, hf)
                             tag_replace(page, tag_full, v, attrs)
                         ElseIf attrs.ContainsKey("var") Then
                             tag_replace(page, tag_full, "", attrs)
@@ -268,12 +270,12 @@ Public Class ParsePage
 
                             '    #also checking for sub
                             If attrs.ContainsKey("sub") Then
-                                If Not TypeOf (tag_value) Is Hashtable Then
-                                    fw.logger(LogLevel.DEBUG, "ParsePage - not a Hash passed for a SUB tag=", tag)
-                                    tag_value = New Hashtable
-                                End If
-                                v = _parse_page(tag_tplpath(tag, tpl_name), tag_value, "", inline_tpl, parent_hf)
+                                v = _attr_sub(tag, tpl_name, hf, attrs, inline_tpl, parent_hf, tag_value)
+                            ElseIf is_found_last_hfvalue Then
+                                'value found but empty
+                                v = ""
                             Else
+                                'value not found - looks like subtemplate in file
                                 v = _parse_page(tag_tplpath(tag, tpl_name), hf, "", inline_tpl, parent_hf)
                             End If
                             tag_replace(page, tag_full, v, attrs)
@@ -284,8 +286,9 @@ Public Class ParsePage
                     End If
 
                 Next tag_match
+            Else
+                'no tags in this template
             End If
-
         End If
 
         'FW.logger("DEBUG", "ParsePage - Parsing template = " & tpl_name & " END")
@@ -315,7 +318,7 @@ Public Class ParsePage
             If is_check_file_modifications Then modtime = File.GetLastWriteTime(filename)
         End If
 
-        'fw.logger("try load file " & filename)
+        'fw.logger("ParsePage - try load file " & filename)
         'get from fs(if not in cache)
         If File.Exists(filename) Then
             file_data = FW.get_file_content(filename)
@@ -349,7 +352,7 @@ Public Class ParsePage
     'Note: also strip tag to short tag
     Private Sub get_tag_attrs(ByRef tag As String, ByRef attrs As Hashtable)
         '        If Regex.IsMatch(tag, "\s") Then
-        If InStr(tag, " ") Then
+        If tag.Contains(" ") Then
             Dim attrs_raw As MatchCollection = RX_ATTRS1.Matches(tag)
 
             tag = attrs_raw.Item(0).Value
@@ -372,13 +375,15 @@ Public Class ParsePage
     'returns: 
     '  value (string, hashtable, etc..), empty string "" 
     '  Or Nothing - tag not present in hf param (only if hf is Hashtable), file lookup will be necessary
-    Private Function hfvalue(ByVal tag As String, ByVal hf As Object) As Object
+    '  set is_found to True if tag value found hf/parent_hf (so can be used to detect if there are no tag value at all so no fileseek required)
+    Private Function hfvalue(ByVal tag As String, ByVal hf As Object, Optional parent_hf As Hashtable = Nothing) As Object
         Dim tag_value As Object = ""
         Dim ptr As Object
+        is_found_last_hfvalue = True
 
         Try
 
-            If Regex.Match(tag, "\[").Success Then
+            If tag.Contains("[") Then
                 Dim parts() As String = tag.Split("[")
                 Dim start_pos As Integer = 0
                 Dim parts0 As String = UCase(parts(0))
@@ -388,6 +393,12 @@ Public Class ParsePage
                     start_pos = 1
                 ElseIf parts0 = "SESSION" Then
                     ptr = fw.SESSION
+                    start_pos = 1
+                ElseIf parts0 = "PARSEPAGE.TOP" Then
+                    ptr = Me.data_top
+                    start_pos = 1
+                ElseIf parts0 = "PARSEPAGE.PARENT" AndAlso parent_hf IsNot Nothing Then
+                    ptr = parent_hf
                     start_pos = 1
                 Else
                     ptr = hf
@@ -427,42 +438,54 @@ Public Class ParsePage
                     End If
                 Next
                 tag_value = ptr
-                If tag_value Is Nothing Then tag_value = ""
             Else
-                If TypeOf (hf) Is HttpSessionState Then
-                    If DirectCast(hf, HttpSessionState).Item(tag) IsNot Nothing Then
-                        tag_value = DirectCast(hf, HttpSessionState).Item(tag)
-                    End If
-                    If tag_value Is Nothing Then tag_value = ""
-                ElseIf TypeOf (hf) Is Hashtable Then
+                If TypeOf (hf) Is Hashtable Then
                     'special name tags - ROOT_URL and ROOT_DOMAIN - hardcoded here because of too frequent usage in the site
                     If tag = "ROOT_URL" OrElse tag = "ROOT_DOMAIN" Then
                         tag_value = fw.config(tag)
-                        If tag_value Is Nothing Then tag_value = ""
                     Else
                         If hf.ContainsKey(tag) Then
                             tag_value = hf(tag)
-                            If tag_value Is Nothing Then tag_value = ""
+                        Else
+                            'if no such tag in Hashtable
+                            is_found_last_hfvalue = False
                         End If
-                        'here tag_value could be Nothing, if no such tag in Hashtable
+                    End If
+                ElseIf TypeOf (hf) Is HttpSessionState Then
+                    If DirectCast(hf, HttpSessionState).Item(tag) IsNot Nothing Then
+                        tag_value = DirectCast(hf, HttpSessionState).Item(tag)
                     End If
 
                 ElseIf tag = "ROOT_URL" Then
                     tag_value = fw.config("ROOT_URL")
-                    If tag_value Is Nothing Then tag_value = ""
 
                 ElseIf tag = "ROOT_DOMAIN" Then
                     tag_value = fw.config("ROOT_DOMAIN")
-                    If tag_value Is Nothing Then tag_value = ""
-
+                Else
+                    is_found_last_hfvalue = False
                 End If
             End If
         Catch ex As Exception
             fw.logger(LogLevel.DEBUG, "ParsePage - error in hvalue for tag [", tag, "]:", ex.Message)
         End Try
 
+        If tag_value Is Nothing Then tag_value = ""
+
         Return tag_value
     End Function
+
+    Private Function _attr_sub(tag As String, tpl_name As String, hf As Hashtable, attrs As Hashtable, inline_tpl As String, parent_hf As Hashtable, tag_value As Object) As String
+        If attrs("sub") > "" Then
+            'if sub attr contains name - use it to get value from hf (instead using tag_value)
+            tag_value = hfvalue(attrs("sub"), hf, parent_hf)
+        End If
+        If Not TypeOf (tag_value) Is Hashtable Then
+            fw.logger(LogLevel.DEBUG, "ParsePage - not a Hash passed for a SUB tag=", tag, ", sub=" & attrs("sub"))
+            tag_value = New Hashtable
+        End If
+        Return _parse_page(tag_tplpath(tag, tpl_name), tag_value, "", inline_tpl, parent_hf)
+    End Function
+
     ' Check for misc if attrs
     Private Function _attr_if(ByVal attrs As Hashtable, ByVal hf As Hashtable) As Boolean
         If attrs.Count = 0 Then Return True ' if there are no if operation - return true anyway and early
@@ -564,6 +587,7 @@ Public Class ParsePage
     End Function
 
     Private Function get_inline_tpl(ByRef hpage As String, ByRef tag As String, ByRef tag_full As String) As String
+        'fw.logger("ParsePage - get_inline_tpl: ", tag, " | ", tag_full)
         Dim re As String = Regex.Escape("<~" + tag_full + ">") + "(.*?)" + Regex.Escape("</~" + tag + ">")
 
         Dim inline_match As Match = Regex.Match(hpage, re, RegexOptions.Singleline Or RegexOptions.IgnoreCase)
@@ -574,7 +598,7 @@ Public Class ParsePage
     End Function
 
     'return ready HTML
-    Private Function _attr_repeat(ByRef attrs As Hashtable, ByRef tag As String, ByRef tag_val_array As Object, ByRef tpl_name As String, ByRef inline_tpl As String) As String
+    Private Function _attr_repeat(ByRef attrs As Hashtable, ByRef tag As String, ByRef tag_val_array As Object, ByRef tpl_name As String, ByRef inline_tpl As String, parent_hf As Hashtable) As String
         'Validate: if input doesn't contain array - return "" - nothing to repeat
         If Not TypeOf (tag_val_array) Is ArrayList Then
             If tag_val_array IsNot Nothing AndAlso tag_val_array.ToString() <> "" Then
@@ -584,18 +608,18 @@ Public Class ParsePage
         End If
 
         Dim value As New StringBuilder
-        Dim parent_hf As Hashtable = New Hashtable
+        If parent_hf Is Nothing Then parent_hf = New Hashtable
 
         Dim ttpath As String = tag_tplpath(tag, tpl_name)
 
         For i As Integer = 0 To tag_val_array.Count - 1
-            proc_repeat_modifiers(tag_val_array, i)
+            proc_repeat_modifiers(tag_val_array, i, parent_hf)
             value.Append(_parse_page(ttpath, tag_val_array(i), "", inline_tpl, parent_hf))
         Next
         Return value.ToString()
     End Function
 
-    Private Sub proc_repeat_modifiers(ByRef uftag As ArrayList, ByVal i As Integer)
+    Private Sub proc_repeat_modifiers(ByRef uftag As ArrayList, ByVal i As Integer, parent_hf As Hashtable)
         Dim uftagi As Hashtable = uftag(i)
         Dim cnt As Integer = uftag.Count
 
@@ -790,29 +814,37 @@ Public Class ParsePage
         hpage_ref = Replace(hpage_ref, "<~" & tag_full & ">", value)
     End Sub
 
-    'attrs("select") can contain strings with separator "," for multiple select
+    'attrs("select") can contain strings with separator in attrs("multi") (default ",") for multiple select
     Private Function _attr_select(tag As String, tpl_name As String, ByRef hf As Hashtable, ByRef attrs As Hashtable) As String
         Dim result As New StringBuilder
 
         Dim sel_value As String = hfvalue(attrs("select"), hf)
         If sel_value Is Nothing Then sel_value = ""
 
-        Dim asel As Array = Split(sel_value, ",")
-        'trim all elements, so it would be simplier to compare
-        For i As Integer = LBound(asel) To UBound(asel)
-            asel(i) = Trim(asel(i))
-        Next
+        Dim multi_delim = ","
+        If attrs.ContainsKey("multi") Then
+            multi_delim = attrs("multi")
+        End If
 
-        If hf.ContainsKey(tag) Then
+        Dim asel As Array
+        If multi_delim > "" Then
+            asel = Split(sel_value, multi_delim)
+            'trim all elements, so it would be simplier to compare
+            For i As Integer = LBound(asel) To UBound(asel)
+                asel(i) = Trim(asel(i))
+            Next
+        Else
+            'no multi value
+            asel = Array.CreateInstance(GetType(String), 0)
+            asel(0) = sel_value
+        End If
+
+        Dim seloptions As Object = hfvalue(tag, hf)
+        If TypeOf seloptions Is ICollection Then
             ' hf(tag) is ArrayList of Hashes with "id" and "iname" keys, for example rows returned from db.array('select id, iname from ...')
             ' "id" key is optional, if not present - iname will be used for values too
-            If Not (TypeOf hf(tag) Is ICollection) Then
-                fw.logger(LogLevel.DEBUG, "ParsePage - not an ArrayList or Hashtables passed for a select tag=", tag)
-                Return ""
-            End If
-
             Dim value As String, desc As String
-            For Each item As Hashtable In hf(tag)
+            For Each item As Hashtable In seloptions
                 desc = Utils.htmlescape(item("iname"))
                 If item.ContainsKey("id") Then
                     value = Trim(item("id"))
@@ -833,6 +865,11 @@ Public Class ParsePage
             'just read from the plain text file
             Dim tpl_path = tag_tplpath(tag, tpl_name)
             If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
+
+            If Not File.Exists(TMPL_PATH + "/" + tpl_path) Then
+                fw.logger(LogLevel.DEBUG, "ParsePage - NOR an ArrayList of Hashtables NEITHER .sel template file passed for a select tag=", tag)
+                Return ""
+            End If
 
             Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
             Dim line As String
@@ -919,13 +956,10 @@ Public Class ParsePage
         Dim sel_value As String = hfvalue(attrs("selvalue"), hf)
         If sel_value Is Nothing Then sel_value = ""
 
-        If hf.ContainsKey(tag) Then
+        Dim seloptions As Object = hfvalue(tag, hf)
+        If TypeOf seloptions Is ICollection Then
             ' hf(tag) is ArrayList of Hashes with "id" and "iname" keys, for example rows returned from db.array('select id, iname from ...')
             ' "id" key is optional, if not present - iname will be used for values too
-            If Not (TypeOf hf(tag) Is ICollection) Then
-                fw.logger(LogLevel.DEBUG, "ParsePage - not an ArrayList or Hashtables passed for a selvalue tag=", tag)
-                Return ""
-            End If
 
             Dim value As String, desc As String
             For Each item As Hashtable In hf(tag)
@@ -944,9 +978,14 @@ Public Class ParsePage
             Next
 
         Else
-
             Dim tpl_path = tag_tplpath(tag, tpl_name)
             If Left(tpl_path, 1) <> "/" Then tpl_path = basedir + "/" + tpl_path
+
+            If Not File.Exists(TMPL_PATH + "/" + tpl_path) Then
+                fw.logger(LogLevel.DEBUG, "ParsePage - NOR an ArrayList of Hashtables NEITHER .sel template file passed for a selvalue tag=", tag)
+                Return ""
+            End If
+
             Dim lines As String() = FW.get_file_lines(TMPL_PATH + "/" + tpl_path)
 
             Dim line As String
