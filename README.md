@@ -245,7 +245,7 @@ User: John (user)
 <pre>
 <~rows repeat inline>
   <~fname>
-  <~comma unless="repeat.last">,< /~comma>
+  <~comma unless="repeat.last" inline>,< /~comma>
 < /~rows>
 </pre>
       </td>
@@ -268,7 +268,7 @@ User: John (user)
 rows.html template file:
 ```
   <~fname>
-  <~comma unless="repeat.last">,</~comma>
+  <~comma unless="repeat.last" inline>,</~comma>
 ```
 
 </td>
