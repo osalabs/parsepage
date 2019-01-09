@@ -354,7 +354,7 @@ Cherry
   - `<~tag date>` or `<~tag date="d M Y H:i">`
 - `truncate` - truncates a variable to a character length (default 80), optionally - append trchar if truncated, truncate at word boundary (trword), truncate at end or in the middle (trend)
   - `<~tag truncate="80" trchar="..." trword="1" trend="1">` - default values
-- `strip_tags` - remove any html tags from value
+- `strip_tags` - remove any html tags from value, use with `noescape`
 - `trim` - remove leading and trailing space from value
 - `nl2br` - convert newline chars to `<br>`
 - `count` - ouput count of elements in value instead of value (for arrays only)
