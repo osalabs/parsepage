@@ -348,7 +348,7 @@ Cherry
   </tbody>
 </table>
 
-- `htmlescape` - replace special symbols by their html equivalents (such as <>,",'). This attribute is applied automatically to all tags by default.
+- `htmlescape` - replace special symbols by their html equivalents (such as <>,",'). This attribute is applied automatically to all tags by default (except if tag is a path to subtemplate from another file)
 - `noescape` - will not apply htmlescape to tag value
 - `date` - will format tag value as date, format depends on language: [PHP](http://php.net/manual/en/function.date.php), [ASP.NET](https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx)
   - `<~tag date>` or `<~tag date="d M Y H:i">`
