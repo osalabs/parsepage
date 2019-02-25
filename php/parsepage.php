@@ -762,7 +762,7 @@ function sec2date($str, $attrs){
  $format='d M Y H:i';
  if ( $attrs['date'] ) $format=$attrs['date'];
  if ($str){
-    if ($str=='0000-00-00 00:00:00'){
+    if ($str=='0000-00-00 00:00:00' || $str=='0000-00-00'){
         return '';
     }
     if ( !preg_match("/^\d+$/", $str) ){
