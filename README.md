@@ -350,8 +350,17 @@ Cherry
 
 - `htmlescape` - replace special symbols by their html equivalents (such as <>,",'). This attribute is applied automatically to all tags by default (except if tag is a path to subtemplate from another file)
 - `noescape` - will not apply htmlescape to tag value
-- `date` - will format tag value as date, format depends on language: [PHP](http://php.net/manual/en/function.date.php), [ASP.NET](https://msdn.microsoft.com/en-us/library/8kb3ddd4(v=vs.80).aspx)
+- `url` - add prefix "http://" if tag value doesn't start with any protocol
+- `number_format` - formats number, examples:
+  - `<~tag number_format>` - for 123456.789 outputs 123,456.79
+  - `<~tag number_format="1" nfthousands="">` - for 123456.789 outputs 123456.8 (no comma)
+- `date` - will format tag value as date, format depends on language: [PHP](http://php.net/manual/en/function.date.php), [ASP.NET](https://docs.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings)
   - `<~tag date>` or `<~tag date="d M Y H:i">`
+  - however support several cross-language values:
+    - `<~tag date>` - output as "m/d/yyyy" - date only
+    - `<~tag date="short">` - output as "m/d/yyyy hh:mm" - date and time short (to minutes)
+    - `<~tag date="long">` - output as "m/d/yyyy hh:mm:ss" - date and time long
+    - `<~tag date="sql">` - output as "yyyy-mm-dd hh:mm:ss" - sql standard date and time
 - `truncate` - truncates a variable to a character length (default 80), optionally - append trchar if truncated, truncate at word boundary (trword), truncate at end or in the middle (trend)
   - `<~tag truncate="80" trchar="..." trword="1" trend="1">` - default values
 - `strip_tags` - remove any html tags from value, use with `noescape`
@@ -360,11 +369,13 @@ Cherry
 - `count` - ouput count of elements in value instead of value (for arrays only)
 - `lower` - convert value to lowercase
 - `upper` - convert value to uppercase
+- `capitalize` - capitalize first word, `capitalize="all"` - capitalize all words
 - `default` - if value is empty, ouput default value instead
   - `<~tag default="none">`
 - `urlencode` - encode value for URLs
-- `var2js` - ouput variable as JSON string
+- `json` (was `var2js`) - ouput variable as JSON string
 - `markdown` - convert markdown text to html using appropriate library for the language (ASP.NET - CommonMark.NET). Note: may wrap tag with <p>
+- `noparse` - doesn't parse file and just include file by tag path as is, ignores all other attrs except `if`
 
 
 - `<~session[var]>` - this tag is a SESSION variable, not in PS hashtable (for PHP it's $_SESSION, for ASP.NET it's current context's HttpSessionState object)
