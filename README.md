@@ -383,7 +383,7 @@ Cherry
 
 ### Commenting tags
 
-- to comment a `<~sometag>` so it won't be displayed just prepend some char to it's name, like '#', for example: `<~#sometag>` (it's just a simple workaround assuming you don't have '#sometag' var in PS and there are no such filename in your template dir).
+- to comment a `<~sometag>` so it won't be displayed just prepend it with '#', for example: `<~#sometag>`. It will be replaced with empty string without parsing
 - to comment an inline tag like `<~rows repeat inline>...</~rows>`, just wrap it into other inline tag with false condition, for example:
 ```
   <~hide if="#" inline>
